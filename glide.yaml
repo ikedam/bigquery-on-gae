@@ -1,0 +1,19 @@
+package: github.com/ikedam/bigquery-on-gae
+import:
+- package: cloud.google.com/go
+  version: ~0.13.0
+  subpackages:
+  - bigquery
+- package: golang.org/x/net
+  subpackages:
+  - context
+- package: google.golang.org/api
+  subpackages:
+  - iterator
+- package: google.golang.org/appengine
+  version: ~1.0.0
+- package: github.com/labstack/echo
+  # Should be < v3.2.0 as 3.2.0 works only with go >= 1.7
+  version: v3.1.0
+  subpackages:
+  - middleware
