@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,8 +17,12 @@ import (
 	"google.golang.org/appengine/aetest"
 )
 
-func TestHandlerDatasets(t *testing.T) {
+func PrepareDummyBigquery() func() {
 	dummyHandler := echo.New()
+	dummyHandler.HTTPErrorHandler = func(err error, c echo.Context) {
+		log.Printf("ERROR: %v: %v: %v", c.Request().Method, c.Request().URL, err)
+		c.NoContent(http.StatusNotFound)
+	}
 	dummyBigquery := dummyHandler.Group("/api/bigquery/v2")
 	dummyBigquery.GET("/projects/:projectID/datasets", func(c echo.Context) error {
 		projectID := c.Param("projectID")
@@ -53,15 +58,34 @@ func TestHandlerDatasets(t *testing.T) {
 			NextPageToken: "",
 		})
 	})
+	dummyBigquery.POST(
+		"/projects/:projectID/datasets/:datasetID/tables/:tableID/insertAll",
+		func(c echo.Context) error {
+			return c.JSON(http.StatusOK, &api_bigquery_v2.TableDataInsertAllResponse {
+				InsertErrors: []*api_bigquery_v2.TableDataInsertAllResponseInsertErrors{},
+				Kind: "bigquery#tableDataInsertAllResponse",
+			})
+		},
+	)
 	dummyBigqueryServer := httptest.NewServer(dummyHandler)
-	defer dummyBigqueryServer.Close()
 
 	if err := os.Setenv(
 		"BIGQUERY_URI",
 		fmt.Sprintf("%s/api/bigquery/v2/", dummyBigqueryServer.URL),
 	); err != nil {
+		dummyBigqueryServer.Close()
 		panic(err)
 	}
+
+	return func(){
+		os.Setenv("BIGQUERY_URI", "")
+		dummyBigqueryServer.Close()
+	}
+}
+
+func TestHandlerDatasets(t *testing.T) {
+	teardown := PrepareDummyBigquery()
+	defer teardown()
 
 	var inst aetest.Instance
 	if _inst, err := aetest.NewInstance(&aetest.Options{
@@ -74,7 +98,7 @@ func TestHandlerDatasets(t *testing.T) {
 	defer inst.Close()
 
 	var req *http.Request
-	if _req, err := inst.NewRequest("GET", "/entity/", nil); err == nil {
+	if _req, err := inst.NewRequest("GET", "/datasets", nil); err == nil {
 		req = _req
 	} else {
 		panic(err)
@@ -96,5 +120,34 @@ func TestHandlerDatasets(t *testing.T) {
 	sort.Strings(data.IDs)
 	if !reflect.DeepEqual([]string{"test1", "test2"}, data.IDs) {
 		t.Errorf("Expected {test1, test2}, but was %#v", data)
+	}
+}
+
+func TestHandlerPut(t *testing.T) {
+	teardown := PrepareDummyBigquery()
+	defer teardown()
+
+	var inst aetest.Instance
+	if _inst, err := aetest.NewInstance(&aetest.Options{
+		StronglyConsistentDatastore: true,
+	}); err == nil {
+		inst = _inst
+	} else {
+		panic(err)
+	}
+	defer inst.Close()
+
+	var req *http.Request
+	if _req, err := inst.NewRequest("GET", "/put", nil); err == nil {
+		req = _req
+	} else {
+		panic(err)
+	}
+	res := httptest.NewRecorder()
+
+	handlerPut(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("Expected 200, but %v", res.Code)
 	}
 }

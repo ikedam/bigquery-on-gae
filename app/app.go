@@ -17,6 +17,7 @@ import (
 
 func init() {
 	http.HandleFunc("/datasets", handlerDatasets)
+	http.HandleFunc("/put", handlerPut)
 }
 
 func NewBigQueryClient(ctx context.Context, projectID string, opts ...option.ClientOption) (*bigquery.Client, error) {
@@ -73,5 +74,38 @@ func handlerDatasets(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Content-Type", "application/json")
 	w.Write(body)
 
+	return
+}
+
+func handlerPut(w http.ResponseWriter, r *http.Request) {
+	ctx := appengine.NewContext(r)
+	projectID := appengine.AppID(ctx)
+
+	var client *bigquery.Client
+	if _client, err := NewBigQueryClient(ctx, projectID); err == nil {
+		client = _client
+	} else {
+		log.Errorf(ctx, "Failed to create bigquery client: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	uploader := client.Dataset("my_dataset").Table("my_table").Uploader()
+
+	type score struct {
+		Name string
+		Num  int
+	}
+	scores := []score{
+		{Name: "n1", Num: 12},
+		{Name: "n2", Num: 31},
+		{Name: "n3", Num: 7},
+	}
+
+	if err := uploader.Put(ctx, scores); err != nil {
+		log.Errorf(ctx, "Failed to put records: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	return
 }
